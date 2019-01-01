@@ -115,21 +115,20 @@ def generate(ctx: click.Context, rank, difficulty, count, starter):
               .format(end - start, (end - start) / count), file=sys.stderr)
 
 @sudoku.command()
-@click.argument('input', type=click.File('r'), required=False)
+@click.argument('infile', type=click.File('r'), required=False)
 @click.pass_context
-def solve(ctx: click.Context, input):
+def solve(ctx: click.Context, infile):
     """Solve one or more Sudoku puzzles.
-    Optional INPUT file (or - for stdin) contains puzzles in JSON format, as
-    produced by the generator. The argument '-' means to read the standard input.
-    If no input file is specified, and this command follows a generate command,
-    then the puzzles produced by the generator are used as the input.
+    Optional INFILE (or - for stdin) contains puzzles in JSON format, as produced by
+    the generator. If no input file is specified, and this command follows a generate
+    command, then the puzzles produced by the generator are used as the input.
     """
     verbose = ctx.obj['verbose']
     output = ctx.obj['output']
     if input is None:
         inputs = ctx.obj['outputs']
     else:
-        inputs = json.load(input)
+        inputs = json.load(infile)
     outputs = []
     for index, puzzle in enumerate(inputs, 1):
         if not isinstance(puzzle, dict) or 'rank' not in puzzle or 'values' not in puzzle:
