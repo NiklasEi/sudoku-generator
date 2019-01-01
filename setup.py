@@ -31,6 +31,6 @@ setup(
     ],
     entry_points='''
         [console_scripts]
-        sudoku=Sudoku.cli:sudoku
+        sudoku=Sudoku.sudoku:sudoku
     ''',
 )
