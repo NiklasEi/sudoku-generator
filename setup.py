@@ -19,7 +19,18 @@
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
-"""Sudoku Puzzle Generation.
-See https://github.com/RutledgePaulV/sudoku-generator for details.
-"""
-__author__ = 'Paul Rutledge and Daniel Brotsky'
+from setuptools import setup, find_packages
+
+setup(
+    name='Sudoku',
+    version='1.0',
+    packages=find_packages(),
+    include_package_data=True,
+    install_requires=[
+        'Click',
+    ],
+    entry_points='''
+        [console_scripts]
+        sudoku=Sudoku.cli:sudoku
+    ''',
+)

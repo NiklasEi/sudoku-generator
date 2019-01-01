@@ -54,9 +54,14 @@ class Solver:
             possibles = self.board.get_possibles(current)
             untried = [val for val in range(current.value + 1, self.board.side_length + 1) if val in possibles]
             if untried:
+                # try the next possible value for this square,
+                # and then move on to the next square
                 current.value = untried[0]
                 index += 1
             else:
+                # need to go back, choose the next value for the previous square,
+                # and then start over again with this square.  So reset its value.
+                current.value = 0
                 index -= 1
         if index < 0:
             return False

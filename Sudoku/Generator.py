@@ -47,6 +47,14 @@ class Generator:
         if starting_file:
             with open(starting_file) as f:
                 numbers = [int(x, base=17) for x in f.read().split()]
+            if len(numbers) == 16:
+                rank = 2
+            elif len(numbers) == 81:
+                rank = 3
+            elif len(numbers) == 256:
+                rank = 4
+            else:
+                raise ValueError("Starter puzzle is not a valid Sudoku: it has {} cells?".format(len(numbers)))
         else:
             if rank == 2:
                 numbers = [1, 2, 3, 4,
@@ -85,7 +93,7 @@ class Generator:
         # constructing board
         self.board = Board(rank, numbers)
         if not Solver(self.board).is_solution():
-            raise ValueError('starter puzzle is not a valid Sudoku:\n{}'.format(self.board))
+            raise ValueError('Starter puzzle is not a valid Sudoku:\n{}'.format(self.board))
 
     # function randomizes an existing complete puzzle
     def randomize(self, iterations):
@@ -121,9 +129,8 @@ class Generator:
             elif case == 3:
                 self.board.swap_band_values(*random_two_in_rank())
 
-    def reduce_via_logical(self, percentage: float):
+    def reduce_via_logical(self, cutoff: int):
         """Remove up to percentage overall cells that can only have their current value"""
-        cutoff = int(percentage * self.board.size)
         if cutoff <= 0:
             return
         # pick used cells at random
@@ -137,9 +144,8 @@ class Generator:
                 if cutoff == 0:
                     break
 
-    def reduce_via_random(self, percentage: float):
+    def reduce_via_random(self, cutoff: int):
         """Remove up to percentage overall cells at random, as long as removal leaves us with a unique solution"""
-        cutoff = int(percentage * self.board.size)
         if cutoff <= 0:
             return
         # sort used cells by density heuristic, highest to lowest
