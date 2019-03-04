@@ -1,6 +1,8 @@
 # MIT License
 #
-# Copyright (c) 2018 Paul Rutledge and Daniel Brotsky
+# Copyright (c) 2018-2019 Daniel Brotsky
+#
+# Portions copyright (c) 2018 Paul Rutledge at https://github.com/RutledgePaulV/sudoku-generator
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -20,6 +22,44 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 from __future__ import annotations
+from typing import List, IO
+
+
+class Cell:
+    """Each cell in a Sudoku board has a row, a column, a tile, and a value.
+    For convenience, a cell can be annotated with its _context_, which is
+    all of the other cells in its row, column, and tile (so called because
+    those are the cells that constrain its value)."""
+
+    def __init__(self, row: int, col: int, tile: int, value: int = 0):
+        """Each cell is initialized with its row, column, and tile.
+        If a value is specified, that's remembered, otherwise the cell
+        is initialized with a 0 value (meaning blank).  The context
+        of each cell is initialized to empty; it is expected to be
+        used as a cache by the board containing the cell.
+        No error checking is done of any values.
+        """
+        self.row = row
+        self.col = col
+        self.tile = tile
+        self.value = value
+        self.context = []
+
+    def __repr__(self):
+        """The (almost) eval-able form of a cell is its constructor (with its id for specificity)."""
+        return "<Cell(row={},col={},tile={},value={}) at {}>".format(self.row, self.col, self.tile, self.value,
+                                                                     id(self))
+
+    def __str__(self):
+        """In traditional Sudoku, each cell is represented by its value as a single character.
+        This implementation assumes a puzzle side_length no bigger than 5 (so 25 as max cell value).
+        """
+        if self.value == 0:
+            return "-"
+        elif self.value < 10:
+            return str(self.value)
+        else:
+            return chr(ord('A') + self.value - 10)
 
 
 class Board:
@@ -29,47 +69,64 @@ class Board:
     we use a 0 as the value in an empty cell.  This implementation organizes puzzle cells
     left-to-right along each row, and the rows are read top-to-bottom.  Tiles are also
     organized in the same order.  The _rank_ of the puzzle is the number of squares
-    along the edge of each tile, hence a 9x9 puzzle has a rank of 3.  Each horizontal
+    along the edge of each tile, hence a 9x9 puzzle has a side_length of 3.  Each horizontal
     collection of aligned tiles is called a _band_, and each vertical collection of
     aligned tiles is called a _stack_.
     """
-    def __init__(self, rank: int = 3, numbers: [int] = None):
-        """Create a board with the given rank and initial cell values.
-        If you don't specify initial values then all cells will be empty.
-        Basic range checking is done on the values to make sure that they
-        match the shape of the puzzle, but it's possible to create boards
-        with non-solvable context.
+    def __init__(self, values: [int]):
+        """Create a board with the given initial cell values.
+        Cell values are filled left-to-right, top-to-bottom from the given array.
+        Basic range checking is done on the values to make sure that the puzzle
+        is well-formed, but it's not checked to see if it has a solution.
         """
         # validate arguments
-        if rank not in [2, 3, 4]:
-            raise ValueError("Rank must be 2, 3, or 4 (giving side length of 4, 9, or 16)")
-        self.rank = rank
-        self.side_length = rank * rank
-        self.size = self.side_length * self.side_length
-        if numbers:
-            if len(numbers) != self.size:
-                raise ValueError("You must specify a value for each square")
-            if max(numbers) > self.side_length or min(numbers) < 0:
-                raise ValueError("Each cell value must be in the range 0 to {}".format(self.side_length))
+        self.size = len(values)
+        if self.size == 16:
+            self.rank = 2
+            self.side_length = 4
+        elif self.size == 81:
+            self.rank = 3
+            self.side_length = 9
+        elif self.size == 256:
+            self.rank = 4
+            self.side_length = 16
         else:
-            numbers = [0] * self.size
+            raise ValueError("Side length must be 4, 9, or 16 (containing 16, 81, or 256 values)")
+        if max(values) > self.side_length or min(values) < 0:
+            raise ValueError("Each cell value must be in the range 0 to {}".format(self.side_length))
         # create the indices
-        self.rows = [[] for i in range(self.side_length)]
-        self.columns = [[] for i in range(self.side_length)]
-        self.tiles = [[] for i in range(self.side_length)]
-        self.cells = []
+        self.rows: List[List[Cell]] = [[] for _ in range(self.side_length)]
+        self.columns: List[List[Cell]] = [[] for _ in range(self.side_length)]
+        self.tiles: List[List[Cell]] = [[] for _ in range(self.side_length)]
+        self.cells: List[Cell] = []
         # create initialized cells and put them in their row, column and tile
+        value_index = 0
         for row in range(0, self.side_length):
             for col in range(0, self.side_length):
                 tile = self.rank * (row // self.rank) + (col // self.rank)
-                cell = Cell(row, col, tile, numbers.pop(0))
+                cell = Cell(row, col, tile, values[value_index])
                 self.rows[row].append(cell)
                 self.columns[col].append(cell)
                 self.tiles[tile].append(cell)
                 self.cells.append(cell)
+                value_index += 1
         # for each cell, pre-compute its context (the cells in its row, column, or tile)
         for cell in self.cells:
             cell.context = self.get_context(cell)
+
+    @classmethod
+    def from_file(cls, file: IO):
+        """Create a new board from an open file stream.
+        The named file should contain a puzzle's worth of cell values separated
+        by whitespace, where each value is a single digit from 0 (for empty) to
+        the side length of the puzzle, using the values from 1-9 and A-G.
+        The values are inserted into the puzzle rows from left to right
+        and top to bottom, and newlines are treated the same as any other
+        whitespace, so it's easy to format the file using one line per row.  The
+        puzzle in the file is checked to make sure it's a valid puzzle, so
+        if you have any typos the construction will throw an error.
+        """
+        return Board([int(x, base=17) for x in file.read().split()])
 
     def get_filled_cells(self) -> [Cell]:
         """Return all the cells with values."""
@@ -135,11 +192,13 @@ class Board:
 
     def copy(self) -> Board:
         """Return a deep copy of this board."""
-        return Board(rank=self.rank, numbers=[c.value for c in self.cells])
+        return Board(values=[c.value for c in self.cells])
 
-    def dict(self):
-        """Return a dictionary that can be used to recreate this board."""
-        return {'rank': self.rank, 'values': [cell.value for cell in self.cells]}
+    def values(self):
+        """Return the array of values in this board.
+        Values are returned left-to-right, top-to-bottom, and can be used to recreate the board.
+        """
+        return [cell.value for cell in self.cells]
 
     def html(self) -> str:
         """Return an HTML representation of this board."""
@@ -176,41 +235,4 @@ class Board:
 
     def __repr__(self):
         """The (almost) eval-able form of a board is its constructor (with its id for specificity)."""
-        return '<Board(rank={rank},numbers={values}) at {id}>'.format(id=id(self),**self.dict())
-
-
-class Cell:
-    """Each cell in a Sudoku board has a row, a column, a tile, and a value.
-    For convenience, a cell can be annotated with its _context_, which is
-    all of the other cells in its row, column, and tile (so called because
-    those are the cells that constrain its value)."""
-
-    def __init__(self, row: int, col: int, tile: int, value: int = 0):
-        """Each cell is initialized with its row, column, and tile.
-        If a value is specified, that's remembered, otherwise the cell
-        is initialized with a 0 value (meaning blank).  The context
-        of each cell is initialized to empty; it is expected to be
-        used as a cache by the board containing the cell.
-        No error checking is done of any values.
-        """
-        self.row = row
-        self.col = col
-        self.tile = tile
-        self.value = value
-        self.context = []
-
-    def __repr__(self):
-        """The (almost) eval-able form of a cell is its constructor (with its id for specificity)."""
-        return "<Cell(row={},col={},tile={},value={}) at {}>".format(self.row, self.col, self.tile, self.value,
-                                                                     id(self))
-
-    def __str__(self):
-        """In traditional Sudoku, each cell is represented by its value as a single character.
-        This implementation assumes a puzzle rank no bigger than 5 (so 25 as max cell value).
-        """
-        if self.value == 0:
-            return "-"
-        elif self.value < 10:
-            return str(self.value)
-        else:
-            return chr(ord('A') + self.value - 10)
+        return '<Board({values}) at {id}>'.format(id=id(self), values=self.values())

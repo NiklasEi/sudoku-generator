@@ -1,6 +1,6 @@
 # MIT License
 #
-# Copyright (c) 2018 Paul Rutledge and Daniel Brotsky
+# Copyright (c) 2018-2019 Daniel Brotsky
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -19,139 +19,112 @@
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
+import json
 import sys
 import time
-import json
+
 import click
-from collections import namedtuple
 
-from .Generator import Generator
-from .Board import Board
-from .Solver import Solver
-
-# Thresholds that define the difficulty levels
-Threshold = namedtuple('Threshold', 'logical random')
-thresholds = {
-    'easy': Threshold(0.34, 0.0),
-    'medium': Threshold(0.34, 0.065),
-    'hard': Threshold(0.34, 0.13),
-    'extreme': Threshold(0.40, 0.195),
-    'insane': Threshold(0.40, 0.26),
-}
+from .board import Board
+from .generator import Generator
+from .norvig_solver import Solver
 
 
-@click.group(chain=True)
+@click.group()
 @click.pass_context
 @click.option('-v', '--verbose', count=True,
               help="print puzzle details then content to stderr")
-@click.option('-o', '--output', type=click.Choice(['json', 'html', 'ascii']), default='json', show_default=True,
-              help="format for writing puzzles to stdout")
+@click.option('-o', '--output', type=click.Choice(['json', 'html', 'ascii']),
+              default='json', show_default=True,
+              help="format for writing results to stdout")
 def sudoku(ctx: click.Context, verbose: int, output: str):
     ctx.ensure_object(dict)
     ctx.obj['verbose'] = verbose
     ctx.obj['output'] = output
 
+
 @sudoku.command()
-@click.option('-r', '--rank', type=click.IntRange(min=2, max=4), default=3, show_default=True,
-              help="square root of side length (2, 3, or 4)")
-@click.option('-d', '--difficulty', type=click.Choice(thresholds.keys()), default='easy', show_default=True,
-              help="desired difficulty of the generated puzzle")
-@click.option('-c', '--count', default=1, show_default=True,
-              help="how many puzzles to generate")
-@click.option('--starter', type=click.Path(exists=True, dir_okay=False),
-              help="Start from complete puzzle found in a file. "
-                   "The file format is whitespace-separated cell values, read left-to-right top-to-bottom. "
-                   "You can use multiple lines, one row per line, but linebreaks are not required. "
-                   "The rank is inferred from the number of cells.")
+@click.option('-s', '--sidelen', type=click.Choice(["4", "9", "16"]),
+              required=True,
+              help="Desired puzzle side length (4, 9, or 16).")
+@click.option('-d', '--difficulty', type=click.Choice(Generator.thresholds.keys()),
+              default='easy', show_default=True,
+              help="Desired difficulty of the generated puzzle.")
+@click.option('-c', '--count', type=click.IntRange(min=1),
+              default=1, show_default=True,
+              help="How many puzzles to generate.")
 @click.pass_context
-def generate(ctx: click.Context, rank, difficulty, count, starter):
+def generate(ctx: click.Context, sidelen, difficulty, count):
     """Generate one or more Sudoku puzzles.
     You can specify the size and difficulty of the puzzles."""
     verbose = ctx.obj['verbose']
     output = ctx.obj['output']
     outputs = []
-    logical, random = thresholds[difficulty].logical, thresholds[difficulty].random
+    gen = Generator(sidelen, difficulty)
     start = time.time()
     for iteration in range(1, count + 1):
-        gen = Generator(rank, starter)
-        if verbose >= iteration:
-            print("Request {0} is for '{3}' rank {1} ({2}x{2}).  Randomizing solution..."
-                  .format(iteration, gen.board.rank, gen.board.side_length, difficulty), file=sys.stderr)
-        gen.randomize(gen.board.size + 20)
-        initial = gen.board.copy()
-        if verbose > iteration:
-            print("Solution puzzle {}:\n\n{}".format(iteration, initial), file=sys.stderr)
-        logical_cutoff, random_cutoff = int(logical * initial.size), int(random * initial.size)
-        if verbose >= iteration:
-            print("Removing up to {} fully-constrained values {:.0%}..."
-                  .format(logical_cutoff, logical), file=sys.stderr)
-        gen.reduce_via_logical(logical_cutoff)
-        if verbose >= iteration:
-            print("Removing up to {} randomly-chosen values {:.0%}..."
-                  .format(random_cutoff, random), file=sys.stderr)
-        gen.reduce_via_random(random_cutoff)
-        final = gen.board.copy()
-        outputs.append(final)
-        if verbose >= iteration:
-            print("Removed a total of {} values; {} values remain in puzzle."
-                  .format(len(final.get_empty_cells()), len(final.get_filled_cells())), file=sys.stderr)
-        if verbose > iteration:
-            print("Generated puzzle {}:\n\n{}".format(iteration, final), file=sys.stderr)
-        if output == 'html':
-            print(final.html())
-        elif output == 'ascii':
-            print(final.ascii())
+        result = gen.generate_one()
+        outputs.append(result)
     end = time.time()
-    ctx.obj['outputs'] = outputs
     if output == 'json':
-        print(json.dumps([board.dict() for board in outputs]))
-    if verbose and count > 1:
+        print(json.dumps([dict(puzzle=result['puzzle'].values(),
+                               solution=result['solution'].values())
+                          for result in outputs]))
+    else:
+        for iteration, result in enumerate(outputs, 1):
+            if output == 'html':
+                print("Puzzle #{0}:\n{1}\nSolution #{0}:\n{2}\n"
+                      .format(iteration, result['puzzle'].html(), result['solution'].html()), file=sys.stderr)
+            elif output == 'ascii':
+                print("Puzzle #{0}:\n{1}\nSolution #{0}:\n{2}\n"
+                      .format(iteration, result['puzzle'].ascii(), result['solution'].ascii()), file=sys.stderr)
+    if verbose:
         print("Summary statistics:", file=sys.stderr)
-        for index, board in enumerate(outputs, 1):
+        puzzle_str = "puzzles that are" if count > 1 else "puzzle that is"
+        print("Generated {3} '{0}' {2} {1}x{1}."
+              .format(difficulty, int(sidelen), puzzle_str, count), file=sys.stderr)
+        print("Each puzzle had up to {} fully-constrained values ({:.0%}) removed."
+              .format(gen.single_value_cutoff, gen.single_value_threshold), file=sys.stderr)
+        print("Each puzzle had up to {} randomly-chosen values ({:.0%}) removed."
+              .format(gen.random_cutoff, gen.random_threshold), file=sys.stderr)
+        for index, result in enumerate(outputs, 1):
+            board = result['puzzle']
             empty, filled, total = len(board.get_empty_cells()), len(board.get_filled_cells()), board.size
             print("Puzzle {}: Empty={} ({:.0%}), Filled={} ({:.0%})."
-                  .format(index, empty, empty/total, filled, filled/total), file=sys.stderr)
+                  .format(index, empty, empty / total, filled, filled / total), file=sys.stderr)
         print("Generation time: {:.1f} seconds total (average {:.1f} seconds per puzzle)."
               .format(end - start, (end - start) / count), file=sys.stderr)
 
+
 @sudoku.command()
-@click.argument('infile', type=click.File('r'), required=False)
+@click.argument('infile', type=click.File(), required=True)
 @click.pass_context
 def solve(ctx: click.Context, infile):
-    """Solve one or more Sudoku puzzles.
-    Optional INFILE (or - for stdin) contains puzzles in JSON format, as produced by
-    the generator. If no input file is specified, and this command follows a generate
-    command, then the puzzles produced by the generator are used as the input.
+    """Solve the puzzle whose values are specified in INFILE (or - for stdin).
+    The file format is whitespace-separated cell values, filled left-to-right top-to-bottom.
+    You can use multiple lines in the file, one row per line, but linebreaks are not required.
+    Each value is a digit 1-9/A-G. The puzzle size is inferred from the number of cells."
     """
     verbose = ctx.obj['verbose']
     output = ctx.obj['output']
-    if input is None:
-        inputs = ctx.obj['outputs']
-    else:
-        inputs = json.load(infile)
-    outputs = []
-    for index, puzzle in enumerate(inputs, 1):
-        if not isinstance(puzzle, dict) or 'rank' not in puzzle or 'values' not in puzzle:
-            raise ValueError("Not a valid puzzle specification: {}".format(puzzle))
-        board = Board(puzzle['rank'], puzzle['values'])
+    if infile is None:
+        raise ValueError("You must specify a puzzle to solve.")
+    board = Board.from_file(infile)
+    if verbose:
+        print("Puzzle before solving is:\n\n{}".format(board), file=sys.stderr)
+    solver = Solver(board)
+    if solver.can_solve():
+        solution = solver.solution
         if verbose:
-            print("Puzzle {} before solving was:\n\n{}".format(index, board), file=sys.stderr)
-        solver = Solver(board)
-        if solver.can_solve():
-            solution = solver.board
-            outputs.append(solution.dict())
-            if verbose:
-                print("Puzzle {} after solving is:\n\n{}".format(index, solution), file=sys.stderr)
-            if output == 'html':
-                print(solution)
-            elif output == 'ascii':
-                print(solution)
+            print("Puzzle after solving is:\n\n{}".format(solution), file=sys.stderr)
+        if output == 'html':
+            print(solution.html())
+        elif output == 'ascii':
+            print(solution)
         else:
-            outputs.append(board.dict())
-            if verbose:
-                print("Puzzle {} has no solution.".format(index), file=sys.stderr)
-    if output == 'json':
-        print(json.dumps(outputs))
+            print(json.dumps(dict(puzzle=board.values(), solution=solution.values())))
+    else:
+        raise ValueError("Puzzle cannot be solved")
 
 
 if __name__ == '__main__':
