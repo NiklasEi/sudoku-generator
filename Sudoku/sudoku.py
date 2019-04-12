@@ -47,7 +47,8 @@ def sudoku(ctx: click.Context, verbose: int, output: str):
 @click.option('-s', '--sidelen', type=click.Choice(["4", "9", "16"]),
               required=True,
               help="Desired puzzle side length (4, 9, or 16).")
-@click.option('-d', '--difficulty', type=click.Choice(Generator.thresholds.keys()),
+@click.option('-d', '--difficulty',
+              type=click.Choice(Generator.thresholds.keys()),
               default='easy', show_default=True,
               help="Desired difficulty of the generated puzzle.")
 @click.option('-c', '--count', type=click.IntRange(min=1),
@@ -82,18 +83,21 @@ def generate(ctx: click.Context, sidelen, difficulty, count):
         print("Summary statistics:", file=sys.stderr)
         puzzle_str = "puzzles that are" if count > 1 else "puzzle that is"
         print("Generated {3} '{0}' {2} {1}x{1}."
-              .format(difficulty, int(sidelen), puzzle_str, count), file=sys.stderr)
-        print("Each puzzle had up to {} fully-constrained values ({:.0%}) removed."
-              .format(gen.single_value_cutoff, gen.single_value_threshold), file=sys.stderr)
-        print("Each puzzle had up to {} randomly-chosen values ({:.0%}) removed."
-              .format(gen.random_cutoff, gen.random_threshold), file=sys.stderr)
+              .format(difficulty, sidelen, puzzle_str, count),
+              file=sys.stderr)
         for index, result in enumerate(outputs, 1):
             board = result['puzzle']
-            empty, filled, total = len(board.get_empty_cells()), len(board.get_filled_cells()), board.size
+            empty = len(board.get_empty_cells())
+            filled = len(board.get_filled_cells())
+            total = board.size
             print("Puzzle {}: Empty={} ({:.0%}), Filled={} ({:.0%})."
-                  .format(index, empty, empty / total, filled, filled / total), file=sys.stderr)
-        print("Generation time: {:.1f} seconds total (average {:.1f} seconds per puzzle)."
-              .format(end - start, (end - start) / count), file=sys.stderr)
+                  .format(index,
+                          empty, empty / total,
+                          filled, filled / total),
+                  file=sys.stderr)
+        print("Generation time: {:.1f} seconds total ({:.1f} secs/puzzle)."
+              .format(end - start, (end - start) / count),
+              file=sys.stderr)
 
 
 @sudoku.command()

@@ -2,7 +2,8 @@
 #
 # Copyright (c) 2018-2019 Daniel Brotsky
 #
-# Portions copyright (c) 2018 Paul Rutledge at https://github.com/RutledgePaulV/sudoku-generator
+# Portions copyright (c) 2018 Paul Rutledge
+# (See at https://github.com/RutledgePaulV/sudoku-generator)
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal

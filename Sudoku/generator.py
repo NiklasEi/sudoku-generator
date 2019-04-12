@@ -2,7 +2,8 @@
 #
 # Copyright (c) 2018-2019 Daniel Brotsky
 #
-# Portions copyright (c) 2018 Paul Rutledge at https://github.com/RutledgePaulV/sudoku-generator
+# Portions copyright (c) 2018 Paul Rutledge
+# (See https://github.com/RutledgePaulV/sudoku-generator)
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -28,20 +29,45 @@ from .norvig_solver import Solver
 
 
 class Generator:
-    """Generate a puzzle.  Puzzle generation is done by starting with a solved puzzle,
-    performing a bunch of random (correctness-preserving) transformations on it, and
-    then randomly deleting values from cells (as long as doing so would not allow
-    for more than one solution)."""
+    """Generate a problem puzzle by removing values from a solved puzzle,
+    making sure that removal of the value doesn't introduce another solution.
+
+    Before we start removing squares, we pick one of a small set of solved
+    puzzles and preform a sequence of randomly-chosen, correctness-preserving
+    transformations on it.  (Without this step, we would have to have a large
+    number of solutions to generate a large number of puzzles.)
+
+    We then pick squares whose values should be removed.  We do this
+    in two sequences:
+
+    First, we examine each square in the puzzle in a random sequence, and if
+    the immediate neighbors of that square (row, column, and tile) constrain
+    it completely, we remove its value.  The result of this step is always
+    "easy" to solve, because there is always at least one square which can
+    only have one value.
+
+    Second, we take all the remaining squares that have values
+    and we sort them from most-constrained to least-constrained (with
+    random ordering where there are ties).  For each of these squares,
+    we see if the puzzle can be solved with a different value in the
+    square.  If not, we remove the square's value.
+
+    The more squares we remove in each step, the harder the puzzle should be
+    to solve.  But because the first few squares removed in the second step
+    are most likely to be those who are completely constrained by their
+    neighbors, stopping the first step before it has tried to remove values
+    from every square means the second step will first try to complete the
+    first step.
+    """
 
     # fraction of single-valued and random squares to remove based on the difficulty level
     thresholds = {
-        'easy': (0.34, 0.0),
-        'medium': (0.34, 0.065),
-        'hard': (0.34, 0.13),
-        'extreme': (0.34, 0.195),
-        'insane': (0.34, 0.26),
+        'easy': {'4': (6, 0), '9': (27, 0), '16': (64, 0)},
+        'medium': {'4': (9, 1), '9': (41, 5), '16': (96, 16)},
+        'hard': {'4': (12, 2), '9': (54, 10), '16': (128, 33)},
+        'extreme': {'4': (16, 3), '9': (81, 15), '16': (184, 49)},
+        'insane': {'4': (16, 4), '9': (81, 20), '16': (256, 66)}
     }
-
     # Starting solved boards of the supported sizes
     start_values = {
         "4": [[1, 2, 3, 4,
@@ -101,7 +127,7 @@ class Generator:
                 7, 8, 5, 6, 11, 12, 9, 10, 15, 16, 13, 14, 3, 4, 1, 2,
                 11, 12, 9, 10, 15, 16, 13, 14, 3, 4, 1, 2, 7, 8, 5, 6,
                 15, 16, 13, 14, 3, 4, 1, 2, 7, 8, 5, 6, 11, 12, 9, 10],
-               ]
+               ],
     }
 
     def __init__(self, side_length: str, difficulty: str):
@@ -111,21 +137,22 @@ class Generator:
             self.start_values_list = self.start_values[side_length]
             puzzle_size = int(side_length) * int(side_length)
         else:
-            raise ValueError("Side length ({}) must be one of {}".format(side_length, self.start_values.keys()))
+            raise ValueError("Side length ({}) must be one of {}"
+                             .format(side_length, self.start_values.keys()))
         if difficulty in self.thresholds.keys():
-            self.single_value_threshold, self.random_threshold = self.thresholds[difficulty]
+            thresholds = self.thresholds[difficulty][side_length]
+            self.first_cutoff, self.second_cutoff = thresholds
         else:
             raise ValueError("Unknown difficulty level: {}".format(difficulty))
-        self.single_value_cutoff = int(self.single_value_threshold * puzzle_size)
-        self.random_cutoff = int(self.random_threshold * puzzle_size)
 
     def randomize(self, iterations):
         """Randomizes a random solution by doing swaps of rows and cols
         in a manner that preserves the Sudoku invariants.  Both the form of
         the swap and the rows/cols/bands/stacks to swap are chosen at random.
         """
+
         def random_two_in_rank() -> (int, int):
-            """Pick two values at random that are smaller than the side_length"""
+            """Pick two random values smaller than the rank of the board."""
             possibles = list(range(0, self.board.rank))
             random.shuffle(possibles)
             return possibles[0], possibles[1]
@@ -149,36 +176,39 @@ class Generator:
             elif case == 3:
                 self.board.swap_band_values(*random_two_in_rank())
 
-    def reduce_via_logical(self):
-        """Remove up to percentage overall cells that can only have their current value"""
-        cutoff = self.single_value_cutoff
-        if cutoff <= 0:
-            return
-        # pick used cells at random
+    def remove_values_1(self, cutoff):
+        """Do the first pass at removing values from cells.
+        Pick up to cutoff cells at random. Then remove each cell's value if
+        it's the only possible value for that cell.
+        """
         cells = self.board.get_filled_cells()
         random.shuffle(cells)
-        # for each used cell, if it has only one possible value, remove that value
         for cell in cells:
+            if cutoff <= 0:
+                return
             if len(self.board.get_possibles(cell)) == 1:
                 cell.value = 0
                 cutoff -= 1
-                if cutoff == 0:
-                    break
 
-    def reduce_via_random(self):
-        """Remove up to percentage overall cells at random, as long as removal leaves us with a unique solution"""
-        cutoff = self.random_cutoff
-        if cutoff <= 0:
-            return
-        # sort used cells by density heuristic, highest to lowest
-        ranked_cells = [(x, self.board.get_density(x)) for x in self.board.get_filled_cells()]
-        cells = [x[0] for x in sorted(ranked_cells, key=lambda x: x[1], reverse=True)]
-        # for each used cell, try every other possible value to see if it leads to a solution
-        # if not, then removing this value doesn't alter the unique solution, so remove it
+    def reduce_pass_2(self, cutoff):
+        """Do the second pass at removing values from cells.
+        Pick up to cutoff cells sorted from highest to lowest density
+        (breaking ties randomly).  Then remove each cell's value if doing so
+        doesn't lead to another possible solution.
+        """
+        ranked_cells = [(x, self.board.get_density(x)) for x in
+                        self.board.get_filled_cells()]
+        random.shuffle(ranked_cells)
+        cells = [x[0] for x in
+                 sorted(ranked_cells, key=lambda x: x[1], reverse=True)]
         for cell in cells:
+            if cutoff <= 0:
+                return
             original = cell.value
-            others = [x for x in self.board.get_possibles(cell) if x != original]
-            for x in others:
+            # for every other possible cell value, see if the board is solvable
+            # if it is, then restore the original value so it isn't removed.
+            for x in [val for val in self.board.get_possibles(cell)
+                                     if val != original]:
                 cell.value = x
                 if Solver(self.board).can_solve():
                     cell.value = original
@@ -186,20 +216,20 @@ class Generator:
             if cell.value != original:
                 cell.value = 0
                 cutoff -= 1
-                if cutoff == 0:
-                    break
 
     def generate_one(self) -> dict:
         """Generate a new puzzle and solution.
         The returned dictionary has a 'puzzle' entry and a 'solution' entry.
         """
-        self.board = Board(self.start_values_list[random.randrange(0, len(self.start_values_list))])
+        index = random.randrange(0, len(self.start_values_list))
+        self.board = Board(self.start_values_list[index])
         if not Solver(self.board).is_solution():
-            raise ValueError("Starting board is not a solution:\n{}".format(self.board.ascii()))
+            # Can't happen!  This is a program error.
+            raise AssertionError("Board {} is not a solution!".format(index))
         self.randomize(self.board.size + 20)
         solution = self.board.copy()
-        self.reduce_via_logical()
-        self.reduce_via_random()
+        self.remove_values_1(self.first_cutoff)
+        self.reduce_pass_2(self.second_cutoff)
         puzzle = self.board
         self.board = None
         return dict(puzzle=puzzle, solution=solution)

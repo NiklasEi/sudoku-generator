@@ -2,6 +2,9 @@
 #
 # Copyright (c) 2019 Daniel Brotsky
 #
+# Portions copyright (c) 2017 by Peter Norvig and Naoki Shibuya
+# (See https://towardsdatascience.com/peter-norvigs-sudoku-solver-25779bb349ce)
+#
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
 # in the Software without restriction, including without limitation the rights
@@ -25,7 +28,8 @@ from .board import Board
 
 
 class Solver:
-    """This solver was originally published by Peter Norvig and updated to py3 by Naoki Shibuya.
+    """This solver was originally published by Peter Norvig.
+    It was later updated to py3 by Naoki Shibuya.
     See https://towardsdatascience.com/peter-norvigs-sudoku-solver-25779bb349ce
     for the code and an explanation of how it works. Small adaptations have been made
     to adapt for multiple sizes of puzzle and to invoke the solver from the generator.
